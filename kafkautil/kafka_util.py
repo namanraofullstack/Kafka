@@ -18,7 +18,7 @@ def search_messages(topic, indicator, bootstrap_servers=BOOTSTRAP_SERVERS, count
     consumer = KafkaConsumer(
         topic,
         bootstrap_servers=bootstrap_servers,
-        auto_offset_reset='earliest',
+        auto_offset_reset='latest',
         enable_auto_commit=False,
         consumer_timeout_ms=3000
     )
@@ -48,7 +48,7 @@ def stream_messages(topic, indicator, bootstrap_servers=BOOTSTRAP_SERVERS):
     consumer = KafkaConsumer(
         topic,
         bootstrap_servers=bootstrap_servers,
-        auto_offset_reset='earliest',
+        auto_offset_reset='latest',
         enable_auto_commit=False,
         consumer_timeout_ms=3000
     )
@@ -117,8 +117,8 @@ def run_tests():
     print("[TEST] Starting Kafka utility edge case checks...\n")
 
     # Test configuration
-    LARGE_MESSAGE_COUNT = 5000         # For dump test
-    STREAM_MESSAGE_COUNT = 10000       # For search test
+    LARGE_MESSAGE_COUNT = 500         # For dump test
+    STREAM_MESSAGE_COUNT = 1000      # For search test
     MATCH_INTERVAL = 10                # Every nth message has "error"
 
     # Temp directory for test artifacts

@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # System metrics via node-exporter
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # # Your Kafka utility service
+  # - job_name: 'kafkautil'
+  #   static_configs:
+  #     - targets: ['kafkautil:5000']
+  #   metrics_path: '/metrics'  # You'd need to add this endpoint
