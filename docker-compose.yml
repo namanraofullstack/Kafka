@@ -18,11 +18,11 @@ services:
       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
     restart: unless-stopped
 
-  kafkautil:
-    build: ./kafkautil
-    container_name: kafkautil
+  djangoapi:
+    build: ./django-simple-api   # path to your django project folder with Dockerfile
+    container_name: djangoapi
     ports:
-      - "5000:5000"
+      - "8000:8000"
     environment:
       BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
@@ -31,7 +31,6 @@ services:
     volumes:
       - ./output:/app/output
 
-  # Prometheus for metrics collection
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -46,7 +45,6 @@ services:
       - '--web.console.templates=/etc/prometheus/consoles'
     restart: unless-stopped
 
-  # Grafana for visualization
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
@@ -60,7 +58,6 @@ services:
     depends_on:
       - prometheus
 
-  # Node exporter for system metrics
   node-exporter:
     image: prom/node-exporter:latest
     container_name: node-exporter

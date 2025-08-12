@@ -104,3 +104,7 @@ show prometheus grafana system metrics
 show updated search api
 read mesages optmization
 
+docker exec -it djangoapi python manage.py kafkasearch --topic my_topic --indicator "error OR fail" --count 5
+
+
+docker exec -it djangoapi python manage.py kafkasearch --topic test-topic --indicator "hash" 
