@@ -17,7 +17,7 @@ python kafka_util.py --api
 
 # use docker compose exec kafkautil
 
-# to run inside te contaner python commands
+# to run inside the contaner python commands
 docker compose exec kafkautil python kafka_util.py --topic test-topic --indicator error --latest
 
 # fetch the messages 
