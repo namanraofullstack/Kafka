@@ -1,3 +1,7 @@
+# timestamp filtering
+Pagination for large results
+Stats summary (total scanned, total matched, partitions scanned)
+
 # Powershell cmd to create topics
 docker exec -it kafka /opt/bitnami/kafka/bin/kafka-topics.sh --create --topic 
 test-topic --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
@@ -87,4 +91,10 @@ Invalid argument combinations - Conflicting flags
 Data Consistency
 
 Consumer group management - No consumer group specified
+
+
+# ideas
+
+Case-insensitive search done
+regex search or done
 

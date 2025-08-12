@@ -2,6 +2,7 @@ import argparse
 from kafka import KafkaConsumer, TopicPartition
 from flask import Flask, request, jsonify
 import os
+import re
 
 app = Flask(__name__)
 
@@ -22,49 +23,44 @@ def search_messages(topic, indicator, bootstrap_servers=BOOTSTRAP_SERVERS, count
     topic_partitions = [TopicPartition(topic, p) for p in partitions]
     consumer.assign(topic_partitions)
 
-    # Get latest offsets
+    # Compile regex for case-insensitive search
+    pattern = re.compile(indicator, re.IGNORECASE)
+
     end_offsets = consumer.end_offsets(topic_partitions)
 
     if latest or count == 1:
-        # For latest match or when count=1, scan from most recent backwards
         matches = []
-        
         for tp in topic_partitions:
             partition_matches = []
             current_offset = end_offsets[tp] - 1
             start_offset = max(end_offsets[tp] - scan_limit, 0)
-            
-            # Scan backwards from latest
+
             for offset in range(current_offset, start_offset - 1, -1):
                 if offset < 0:
                     break
-                    
                 consumer.seek(tp, offset)
                 try:
                     message = next(consumer)
                     msg_value = message.value.decode('utf-8')
-                    if indicator in msg_value:
+                    if pattern.search(msg_value):
                         partition_matches.append((message.timestamp, msg_value))
-                        break  # Found the latest match in this partition
+                        break
                 except StopIteration:
                     break
-            
             matches.extend(partition_matches)
-        
-        # Sort by timestamp descending and take the most recent
+
         if matches:
             matches.sort(key=lambda x: x[0], reverse=True)
             consumer.close()
-            return [matches[0][1]]  # Return just the message content
+            return [matches[0][1]]
         else:
             consumer.close()
             return []
+
     else:
-        # For regular searches, collect matches with timestamps for proper sorting
         matches_with_timestamps = []
         scanned = 0
-        
-        # Seek to scan_limit messages before latest for each partition
+
         for tp in topic_partitions:
             start_offset = max(end_offsets[tp] - scan_limit, 0)
             consumer.seek(tp, start_offset)
@@ -72,17 +68,16 @@ def search_messages(topic, indicator, bootstrap_servers=BOOTSTRAP_SERVERS, count
         for message in consumer:
             scanned += 1
             msg_value = message.value.decode('utf-8')
-            if indicator in msg_value:
+            if pattern.search(msg_value):
                 matches_with_timestamps.append((message.timestamp, msg_value))
                 if count and len(matches_with_timestamps) >= count:
                     break
             if scanned >= scan_limit:
                 break
 
-        # Sort by timestamp descending (newest first) and extract just the messages
         matches_with_timestamps.sort(key=lambda x: x[0], reverse=True)
         matches = [msg for _, msg in matches_with_timestamps]
-        
+
         consumer.close()
         return matches
 
