@@ -98,3 +98,9 @@ Consumer group management - No consumer group specified
 Case-insensitive search done
 regex search or done
 
+
+# what i did 
+show prometheus grafana system metrics
+show updated search api
+read mesages optmization
+
