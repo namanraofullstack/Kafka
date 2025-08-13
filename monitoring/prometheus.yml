@@ -13,8 +13,8 @@ scrape_configs:
     static_configs:
       - targets: ['node-exporter:9100']
 
-  # # Your Kafka utility service
-  # - job_name: 'kafkautil'
-  #   static_configs:
-  #     - targets: ['kafkautil:5000']
-  #   metrics_path: '/metrics'  # You'd need to add this endpoint
+  # Django app metrics
+  - job_name: 'djangoapi'
+    static_configs:
+      - targets: ['djangoapi:8000']  # Django's container:port
+    metrics_path: '/api/metrics'
