@@ -108,3 +108,5 @@ docker exec -it djangoapi python manage.py kafkasearch --topic my_topic --indica
 
 
 docker exec -it djangoapi python manage.py kafkasearch --topic test-topic --indicator "hash" 
+
+docker exec -it djangoapi python manage.py push_test_messages --count 10000 --topic test-topic
