@@ -110,3 +110,12 @@ docker exec -it djangoapi python manage.py kafkasearch --topic my_topic --indica
 docker exec -it djangoapi python manage.py kafkasearch --topic test-topic --indicator "hash" 
 
 docker exec -it djangoapi python manage.py push_test_messages --count 10000 --topic test-topic
+
+Naman.rao@CY-IND-L2207 Kafka % docker exec -i kafka \
+  /opt/bitnami/kafka/bin/kafka-console-producer.sh \
+  --topic test2-topic \
+  --bootstrap-server localhost:9092 \
+  --producer-property partitioner.class=org.apache.kafka.clients.producer.internals.DefaultPartitioner \
+  --producer-property partitioner.ignore.keys=false \
+  --property parse.key=true \
+  --property key.separator=":"
