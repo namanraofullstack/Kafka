@@ -119,3 +119,13 @@ Naman.rao@CY-IND-L2207 Kafka % docker exec -i kafka \
   --producer-property partitioner.ignore.keys=false \
   --property parse.key=true \
   --property key.separator=":"
+
+# create a topic and produce messages
+docker exec -i kafka /opt/bitnami/kafka/bin/kafka-topics.sh --create --topic test2-topic --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1
+
+
+docker exec -i kafka /opt/bitnami/kafka/bin/kafka-console-producer.sh `
+  --topic test2-topic `
+  --bootstrap-server localhost:9092 `
+  --property parse.key=true `
+  --property key.separator=":" 

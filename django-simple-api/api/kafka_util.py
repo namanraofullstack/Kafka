@@ -1,10 +1,10 @@
-import argparse
+# api/kafka_util.py
 import os
 import re
 import sys
 import datetime
+import argparse
 from kafka import KafkaConsumer, TopicPartition
-from kafka.partitioner.default import murmur2
 
 BOOTSTRAP_SERVERS = os.getenv('BOOTSTRAP_SERVERS', 'localhost:9092')
 OUTPUT_DIR = os.getenv('OUTPUT_DIR', './output')
@@ -21,211 +21,259 @@ class Colors:
 def colorize_text(text, color):
     return f"{color}{text}{Colors.END}"
 
-def highlight_indicator(message, indicator):
-    if '&' in indicator or re.search(r'\bAND\b', indicator, re.IGNORECASE):
-        indicators = re.split(r'\s*&\s*|\s+AND\s+', indicator, flags=re.IGNORECASE)
+def highlight_regex_matches(message, pattern):
+    if not pattern:
+        return message
+    try:
+        matches = list(pattern.finditer(message))
+        if not matches:
+            return message
         result = message
-        for ind in indicators:
-            ind = ind.strip()
-            if ind:
-                pattern = re.compile(f'({re.escape(ind)})', re.IGNORECASE)
-                result = pattern.sub(f'{Colors.RED}\\1{Colors.END}', result)
+        for match in reversed(matches):
+            start, end = match.span()
+            highlighted = f"{Colors.RED}{message[start:end]}{Colors.END}"
+            result = result[:start] + highlighted + result[end:]
         return result
-    elif '|' in indicator or re.search(r'\bOR\b', indicator, re.IGNORECASE):
-        indicators = re.split(r'\s*\|\s*|\s+OR\s+', indicator, flags=re.IGNORECASE)
-        result = message
-        for ind in indicators:
-            ind = ind.strip()
-            if ind:
-                pattern = re.compile(f'({re.escape(ind)})', re.IGNORECASE)
-                result = pattern.sub(f'{Colors.RED}\\1{Colors.END}', result)
-        return result
-    else:
-        pattern = re.compile(f'({re.escape(indicator)})', re.IGNORECASE)
-        return pattern.sub(f'{Colors.RED}\\1{Colors.END}', message)
+    except Exception:
+        return message
 
-def get_partition_for_key(key, partitions):
-    """Match Kafka's default partitioner exactly (Murmur2)"""
-    key_bytes = key.encode() if isinstance(key, str) else key
-    return (murmur2(key_bytes) & 0x7fffffff) % len(partitions)
+def parse_multiple_partitions(partition_str):
+    if not partition_str:
+        return None
+    partitions = set()
+    for part in partition_str.split(','):
+        part = part.strip()
+        if '-' in part:
+            try:
+                start, end = map(int, part.split('-'))
+                partitions.update(range(start, end + 1))
+            except ValueError:
+                print(f"Warning: Invalid partition range '{part}', skipping")
+        else:
+            try:
+                partitions.add(int(part))
+            except ValueError:
+                print(f"Warning: Invalid partition '{part}', skipping")
+    return sorted(partitions) if partitions else None
 
-def search_messages(topic, indicator=None, key=None, bootstrap_servers=BOOTSTRAP_SERVERS,
-                    count=None, latest=False, scan_limit=100,
-                    partition=None, start_offset=None, end_offset=None, start_date=None, end_date=None):
+def compile_regex_pattern(indicator, case_sensitive=False):
+    if not indicator:
+        return None, lambda x: True
+    try:
+        flags = 0 if case_sensitive else re.IGNORECASE
+        pattern = re.compile(indicator, flags)
+        return pattern, pattern.search
+    except re.error as e:
+        print(f"Error: Invalid regex pattern '{indicator}': {e}")
+        sys.exit(1)
+
+
+def search_messages(
+    topic, indicator=None, bootstrap_servers=BOOTSTRAP_SERVERS,
+    count=None, latest=False, scan_limit=100, partitions=None,
+    start_offset=None, end_offset=None, start_date=None, end_date=None,
+    case_sensitive=False
+):
     consumer = KafkaConsumer(
         bootstrap_servers=bootstrap_servers,
         enable_auto_commit=False,
-        consumer_timeout_ms=3000
+        consumer_timeout_ms=2000,
+        fetch_max_bytes=104857600,      # 100 MB
+        max_partition_fetch_bytes=10485760,  # 10 MB/partition
+        fetch_min_bytes=1,
+        fetch_max_wait_ms=20,           # much lower latency
+        session_timeout_ms=30000,
+        heartbeat_interval_ms=3000,
     )
 
-    partitions = consumer.partitions_for_topic(topic)
-    if not partitions:
+    available_partitions = consumer.partitions_for_topic(topic)
+    if not available_partitions:
         raise Exception(f"No partitions found for topic: {topic}")
 
-    print(f"Partitions: {partitions}, Total: {len(partitions)}")
+    target_partitions = available_partitions
+    if partitions is not None:
+        invalid = set(partitions) - available_partitions
+        if invalid:
+            print(f"Warning: Partitions {invalid} not in topic {topic}")
+        target_partitions = set(partitions) & available_partitions
+        if not target_partitions:
+            raise Exception(f"No valid partitions from {partitions}")
+        print(f"Searching partitions: {sorted(target_partitions)}")
 
-    # If searching by key, determine the partition
-    if key is not None and partition is None:
-        partition = get_partition_for_key(key, partitions)
-        print(f"Key '{key}' maps to partition {partition}")
-
-    # Restrict to a specific partition if given
-    if partition is not None:
-        if partition not in partitions:
-            raise Exception(f"Partition {partition} not found in topic {topic}")
-        partitions = {partition}
-
-    topic_partitions = [TopicPartition(topic, p) for p in partitions]
+    topic_partitions = [TopicPartition(topic, p) for p in target_partitions]
     consumer.assign(topic_partitions)
 
-    # Compile pattern matching for payload
-    if indicator:
-        if '&' in indicator or re.search(r'\bAND\b', indicator, re.IGNORECASE):
-            indicators = re.split(r'\s*&\s*|\s+AND\s+', indicator, flags=re.IGNORECASE)
-            indicators = [ind.strip() for ind in indicators if ind.strip()]
-            patterns = [re.compile(re.escape(ind), re.IGNORECASE) for ind in indicators]
-            def matches_all(text):
-                return all(pattern.search(text) for pattern in patterns)
-            pattern_func = matches_all
-        elif '|' in indicator or re.search(r'\bOR\b', indicator, re.IGNORECASE):
-            indicators = re.split(r'\s*\|\s*|\s+OR\s+', indicator, flags=re.IGNORECASE)
-            indicators = [ind.strip() for ind in indicators if ind.strip()]
-            or_pattern = '|'.join(re.escape(ind) for ind in indicators)
-            pattern = re.compile(f'({or_pattern})', re.IGNORECASE)
-            pattern_func = pattern.search
-        else:
-            pattern = re.compile(indicator, re.IGNORECASE)
-            pattern_func = pattern.search
-    else:
-        pattern_func = lambda x: True  # No indicator means match all
+    pattern, pattern_func = compile_regex_pattern(indicator, case_sensitive)
+    end_offsets = consumer.end_offsets(topic_partitions)
 
-    end_offsets_dict = consumer.end_offsets(topic_partitions)
+    has_date_filter = start_date is not None or end_date is not None
+    start_ts = int(start_date.timestamp() * 1000) if start_date else None
+    end_ts = int(end_date.timestamp() * 1000) if end_date else None
+
+    matches = []
 
     for tp in topic_partitions:
+        end_offset_abs = end_offsets[tp]
+        if end_offset_abs == 0:
+            continue
+
+        # Calculate scan window
+        # --- FIXED SCAN WINDOW LOGIC ---
         if start_offset is not None:
-            consumer.seek(tp, start_offset)
+            scan_start = max(0, start_offset)
         else:
-            consumer.seek(tp, max(end_offsets_dict[tp] - scan_limit, 0))
+            # Default: go back 'scan_limit' messages from the end
+            scan_start = max(0, end_offset_abs - scan_limit)
 
-    matches_with_timestamps = []
-    scanned = 0
+        if end_offset is not None:
+            scan_end = min(end_offset, end_offset_abs)
+        else:
+            scan_end = end_offset_abs
 
-    for message in consumer:
-        scanned += 1
-
-        # Offset filter
-        if start_offset is not None and message.offset < start_offset:
-            continue
-        if end_offset is not None and message.offset > end_offset:
+        if scan_start >= scan_end:
             continue
 
-        # Date filter
-        msg_time = datetime.datetime.fromtimestamp(message.timestamp / 1000)
-        if start_date and msg_time < start_date:
-            continue
-        if end_date and msg_time > end_date:
-            continue
 
-        # Key filter
-        if key is not None:
-            msg_key = message.key.decode('utf-8') if message.key else None
-            if msg_key != key:
-                continue
+        consumer.seek(tp, scan_start)
 
-        # Payload filter
-        msg_value = message.value.decode('utf-8')
-        if pattern_func(msg_value):
-            matches_with_timestamps.append((message.timestamp, msg_value))
-            if count and len(matches_with_timestamps) >= count:
-                break
+        scanned_count = 0
+        while scanned_count < scan_limit and consumer.position(tp) < scan_end:
+            batch = consumer.poll(timeout_ms=100, max_records=500)
+            if tp not in batch or not batch[tp]:
+                continue  # keep polling until timeout
 
-        if scan_limit and scanned >= scan_limit and not (start_offset or end_offset):
-            break
+            for message in reversed(batch[tp]):  # newest-first
+                if message.offset >= scan_end:
+                    continue
+
+                scanned_count += 1
+                if scanned_count > scan_limit:
+                    break
+
+                # Date filter
+                if has_date_filter and message.timestamp:
+                    if (start_ts and message.timestamp < start_ts) or \
+                       (end_ts and message.timestamp > end_ts):
+                        continue
+
+                # Decode
+                try:
+                    msg_value = message.value.decode("utf-8") if message.value else ""
+                except (UnicodeDecodeError, AttributeError):
+                    msg_value = str(message.value)
+
+                # Pattern check
+                if pattern_func(msg_value):
+                    match_tuple = (msg_value, message.partition, message.offset)
+                    matches.append((match_tuple, message.timestamp or 0))
+
+                    if latest:
+                        consumer.close()
+                        return [match_tuple], pattern
+
+                    if count and len(matches) >= count:
+                        consumer.close()
+                        matches.sort(key=lambda x: x[1], reverse=True)
+                        return [m[0] for m in matches[:count]], pattern
 
     consumer.close()
-    matches_with_timestamps.sort(key=lambda x: x[0], reverse=True)
-    return [msg for _, msg in matches_with_timestamps]
+
+    # Final sort
+    if matches:
+        matches.sort(key=lambda x: x[1], reverse=True)
+        result_matches = [m[0] for m in matches]
+        if count and len(result_matches) > count:
+            result_matches = result_matches[:count]
+        return result_matches, pattern
+
+    return [], pattern
 
 def dump_messages_to_file(messages, filename):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     path = os.path.join(OUTPUT_DIR, filename)
-    print(f"Dumping {len(messages)} messages to file: {path}")
     with open(path, 'w', encoding='utf-8') as f:
-        for m in messages:
-            f.write(m + '\n')
+        for msg, partition, offset in messages:
+            f.write(msg + '\n')
+    print(f"Saved {len(messages)} messages to {path}")
 
-def print_search_summary(topic, indicator, matched_count, scan_limit):
-    print(f"\n{Colors.CYAN}{'='*60}{Colors.END}")
+def print_search_summary(topic, indicator, matched_count, scan_limit, partitions=None):
+    print(f"\n{Colors.CYAN}{'='*70}{Colors.END}")
     print(f"{Colors.BOLD}Kafka Search Results{Colors.END}")
-    print(f"{Colors.CYAN}{'='*60}{Colors.END}")
+    print(f"{Colors.CYAN}{'='*70}{Colors.END}")
     print(f"Topic: {colorize_text(topic, Colors.YELLOW)}")
-    print(f"Searching for: {colorize_text(indicator, Colors.RED)}")
+    if partitions:
+        print(f"Partitions: {colorize_text(str(sorted(partitions)), Colors.BLUE)}")
+    print(f"Regex pattern: {colorize_text(indicator, Colors.RED)}")
     print(f"Matches found: {colorize_text(str(matched_count), Colors.GREEN)}")
     print(f"Scan limit: {colorize_text(str(scan_limit), Colors.BLUE)}")
-    print(f"{Colors.CYAN}{'='*60}{Colors.END}\n")
+    print(f"{Colors.CYAN}{'='*70}{Colors.END}\n")
 
-def print_message(message, indicator, index):
+def print_message(message_data, pattern, index):
+    msg, partition, offset = message_data
     print(f"{Colors.BOLD}Message #{index + 1}:{Colors.END}")
-    print(f"{Colors.CYAN}{'─' * 40}{Colors.END}")
-    print(highlight_indicator(message, indicator))
-    print(f"{Colors.CYAN}{'─' * 40}{Colors.END}\n")
+    print(f"{Colors.CYAN}{'─'*50}{Colors.END}")
+    if pattern:
+        print(highlight_regex_matches(msg, pattern))
+    else:
+        print(msg)
+    print(f"{Colors.CYAN}{'─'*50}{Colors.END}\n")
+    
 
 def cli_interface():
-    parser = argparse.ArgumentParser(description="Search Kafka messages from CLI")
+    parser = argparse.ArgumentParser(description="Kafka regex message search")
     parser.add_argument("--topic", required=True, help="Kafka topic name")
-    parser.add_argument("--indicator", required=True, help="String to search for. Supports: 'word1 OR word2' or 'word1|word2' for OR logic, 'word1 AND word2' or 'word1&word2' for AND logic")
+    parser.add_argument("--pattern", required=True, help="Regex pattern to search")
     parser.add_argument("--count", type=int, help="Number of matches to return")
     parser.add_argument("--latest", action="store_true", help="Return only latest match")
-    parser.add_argument("--scan_limit", type=int, default=100, help="Number of messages to scan from latest")
+    parser.add_argument("--scan_limit", type=int, default=100, help="Messages to scan per partition")
     parser.add_argument("--output", help="File to dump results")
-    parser.add_argument("--no-color", action="store_true", help="Disable colored output")
-    parser.add_argument("--key", help="Message key to search for (exact match)")
-    parser.add_argument("--partition", type=int, help="Partition number to search")
+    parser.add_argument("--case-sensitive", action="store_true", help="Enable case-sensitive regex matching")
+    parser.add_argument("--partition", help="Partitions (e.g. '0,1,2' or '0-3')")
     parser.add_argument("--start_offset", type=int, help="Start offset for search")
     parser.add_argument("--end_offset", type=int, help="End offset for search")
-    parser.add_argument("--start_date", help="Start date in YYYY-MM-DD format")
-    parser.add_argument("--end_date", help="End date in YYYY-MM-DD format")
+    parser.add_argument("--start_date", help="Start date YYYY-MM-DD")
+    parser.add_argument("--end_date", help="End date YYYY-MM-DD")
 
     args = parser.parse_args()
-
-    if args.no_color or not sys.stdout.isatty():
-        for attr in dir(Colors):
-            if not attr.startswith('_'):
-                setattr(Colors, attr, '')
-
+    
+    # Parse dates
     start_date = datetime.datetime.strptime(args.start_date, "%Y-%m-%d") if args.start_date else None
     end_date = datetime.datetime.strptime(args.end_date, "%Y-%m-%d") if args.end_date else None
+    
+    # Parse partitions
+    target_partitions = parse_multiple_partitions(args.partition)
 
     try:
-        print(f"{Colors.YELLOW}Searching Kafka topic '{args.topic}' for '{args.indicator}'...{Colors.END}")
-
-        messages = search_messages(
+        messages, pattern = search_messages(
             args.topic,
-            args.indicator,
-            key=args.key,
+            args.pattern,
             count=args.count,
             latest=args.latest,
             scan_limit=args.scan_limit,
-            partition=args.partition,
+            partitions=target_partitions,
             start_offset=args.start_offset,
             end_offset=args.end_offset,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            case_sensitive=args.case_sensitive
         )
 
-        print_search_summary(args.topic, args.indicator, len(messages), args.scan_limit)
+        print_search_summary(args.topic, args.pattern, len(messages), args.scan_limit, target_partitions)
 
         if messages:
             if args.output:
                 dump_messages_to_file(messages, args.output)
-                print(f"{Colors.GREEN}Results saved to: {args.output}{Colors.END}\n")
-            for i, message in enumerate(messages):
-                print_message(message, args.indicator, i)
+            for i, message_data in enumerate(messages):
+                print_message(message_data, pattern, i)
         else:
-            print(f"{Colors.YELLOW}No messages found matching '{colorize_text(args.indicator, Colors.RED)}'{Colors.END}")
-
+            print(f"{Colors.YELLOW}No messages found matching pattern '{args.pattern}'{Colors.END}")
+            
     except Exception as e:
-        print(f"{Colors.RED}Error: {e}{Colors.END}")
+        print(f"{Colors.RED}Error: {str(e)}{Colors.END}")
+        return 1
+    
+    return 0
+
 
 if __name__ == '__main__':
-    cli_interface()
+    exit(cli_interface())

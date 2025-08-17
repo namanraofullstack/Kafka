@@ -1,5 +1,0 @@
-flask==2.3.2
-kafka-python==2.0.2
-gunicorn==23.0.0
-prometheus-client==0.16.0
-prometheus_flask_exporter==0.20.0
