@@ -129,3 +129,20 @@ docker exec -i kafka /opt/bitnami/kafka/bin/kafka-console-producer.sh `
   --bootstrap-server localhost:9092 `
   --property parse.key=true `
   --property key.separator=":" 
+
+🔹 Get Lag for a consumer group
+docker exec -it kafka /opt/bitnami/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --describe \
+  --group console-consumer-20406 2>/dev/null \
+  | awk 'NR > 1 { lag += $6 } END { print "Total Lag: " lag }'
+
+🔹 Get list of consumer groups
+docker exec -it kafka /opt/bitnami/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --list
+
+🔹 Get list of topics
+docker exec -it kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 \
+  --list

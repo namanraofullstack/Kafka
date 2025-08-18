@@ -5,8 +5,10 @@ import sys
 import datetime
 import argparse
 from kafka import KafkaConsumer, TopicPartition
+import subprocess
+import requests
 
-BOOTSTRAP_SERVERS = os.getenv('BOOTSTRAP_SERVERS', 'localhost:9092')
+BOOTSTRAP_SERVERS = os.getenv('BOOTSTRAP_SERVERS', 'broker:29092')
 OUTPUT_DIR = os.getenv('OUTPUT_DIR', './output')
 
 class Colors:
@@ -189,12 +191,24 @@ def search_messages(
     return [], pattern
 
 def dump_messages_to_file(messages, filename):
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    path = os.path.join(OUTPUT_DIR, filename)
-    with open(path, 'w', encoding='utf-8') as f:
-        for msg, partition, offset in messages:
-            f.write(msg + '\n')
-    print(f"Saved {len(messages)} messages to {path}")
+    import requests  # ensure requests is imported
+
+    # Prepare content to upload
+    content = "\n".join([msg for msg, _, _ in messages])
+
+    # Remote URL and auth
+    remote_url = f"https://packages.cyware.com/repository/cyware/naman/{filename}"
+    auth = ("ctix", "fj3HuaWq3y")  # user:password
+
+    # Upload content
+    response = requests.put(remote_url, data=content.encode("utf-8"), auth=auth)
+
+    if response.status_code in (200, 201):
+        print(f"Upload successful! Uploaded to: {remote_url}")
+        return remote_url
+    else:
+        print(f"Upload failed: {response.status_code}, {response.text}")
+        return None
 
 def print_search_summary(topic, indicator, matched_count, scan_limit, partitions=None):
     print(f"\n{Colors.CYAN}{'='*70}{Colors.END}")
