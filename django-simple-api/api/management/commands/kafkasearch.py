@@ -6,14 +6,18 @@ from api.kafka_util import (
     print_search_summary,
     print_message,
     parse_multiple_partitions,
-    list_topics,  # import the renamed function
+    list_topics,
+    list_groups,  # Added new function import
+    get_lag,      # Added new function import
+    BOOTSTRAP_SERVERS,
 )
+from api.kafka_util import Colors
 
 class Command(BaseCommand):
     help = "Kafka search CLI command"
 
     def add_arguments(self, parser):
-        # Existing search arguments
+        # Search arguments
         parser.add_argument("--topic", required=False, help="Kafka topic name")
         parser.add_argument("--pattern", required=False, help="Regex pattern to search")
         parser.add_argument("--count", type=int, help="Number of matches to return")
@@ -26,23 +30,52 @@ class Command(BaseCommand):
         parser.add_argument("--end_offset", type=int, help="End offset for search")
         parser.add_argument("--start_date", help="Start date YYYY-MM-DD")
         parser.add_argument("--end_date", help="End date YYYY-MM-DD")
+        parser.add_argument("--bootstrap", help="Bootstrap servers", default=BOOTSTRAP_SERVERS)
 
-        # New action argument
+        # New actions
         parser.add_argument("--list_topics", action="store_true", help="List all Kafka topics")
+        parser.add_argument("--list_groups", action="store_true", help="List all Kafka consumer groups")
+        parser.add_argument("--get_lag", help="Get total lag for a consumer group")
 
     def handle(self, *args, **options):
+        bootstrap_servers = options.get("bootstrap", BOOTSTRAP_SERVERS)
+
+        # ------------------- List topics -------------------
         if options.get("list_topics"):
             self.stdout.write("Fetching Kafka topics...")
-            topics = list_topics()
+            topics = list_topics(bootstrap_servers)
             if topics:
                 self.stdout.write("Kafka Topics:")
                 for t in topics:
                     self.stdout.write(f"  - {t}")
             else:
                 self.stdout.write("No topics found.")
-            return  # exit after listing topics
+            return
 
-        # --- Existing search logic below ---
+        # ------------------- List consumer groups -------------------
+        if options.get("list_groups"):
+            self.stdout.write("Listing Kafka consumer groups...")
+            groups = list_groups(bootstrap_servers)  # Use the new API-based function
+            if groups:
+                self.stdout.write("Consumer Groups:")
+                for g in groups:
+                    self.stdout.write(f"  - {g}")
+            else:
+                self.stdout.write("No consumer groups found.")
+            return
+
+        # ------------------- Get total lag -------------------
+        group_name = options.get("get_lag")
+        if group_name:
+            self.stdout.write(f"Calculating total lag for group '{group_name}'...")
+            lag = get_lag(group_name, bootstrap_servers)  # Use the new API-based function
+            if lag is not None:
+                self.stdout.write(f"Total Lag: {lag}")
+            else:
+                self.stdout.write(f"Could not calculate lag for group '{group_name}'")
+            return
+
+        # ------------------- Regular message search -------------------
         topic = options.get("topic")
         pattern = options.get("pattern")
         if not topic or not pattern:
@@ -69,6 +102,7 @@ class Command(BaseCommand):
             messages, pattern_obj = search_messages(
                 topic,
                 pattern,
+                bootstrap_servers=bootstrap_servers,
                 count=count,
                 latest=latest,
                 scan_limit=scan_limit,

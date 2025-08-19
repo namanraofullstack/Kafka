@@ -146,3 +146,10 @@ docker exec -it kafka /opt/bitnami/kafka/bin/kafka-consumer-groups.sh \
 docker exec -it kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 \
   --list
+
+
+docker run -it --rm --network=ctix-v3 -e BOOTSTRAP_SERVER=broker:29092 packages.cyware.com/ctix/naman/kafka-search-tool:latest /bin/bash
+
+python manage.py kafkasearch --list_topics
+
+docker pull packages.cyware.com/ctix/naman/kafka-search-tool:latest

@@ -1,0 +1,3 @@
+#!/bin/bash
+# kafget - shortcut to run kafkasearch
+python manage.py kafkasearch "$@"

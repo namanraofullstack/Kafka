@@ -5,6 +5,7 @@ import sys
 import datetime
 import argparse
 from kafka import KafkaConsumer, TopicPartition
+from kafka.admin import KafkaAdminClient
 import subprocess
 import requests
 
@@ -250,12 +251,63 @@ def list_topics(bootstrap_servers=BOOTSTRAP_SERVERS):
         print(f"{Colors.RED}Error fetching topics: {e}{Colors.END}")
         return []
 
-    
+def list_groups(bootstrap_servers=BOOTSTRAP_SERVERS):
+    """
+    Return a list of Kafka consumer groups using KafkaConsumer API
+    """
+    try:
+        from kafka.admin import KafkaAdminClient
+        admin_client = KafkaAdminClient(
+            bootstrap_servers=bootstrap_servers,
+            client_id='kafka_util'
+        )
+        groups = admin_client.list_consumer_groups()
+        admin_client.close()
+        return [group[0] for group in groups]  # Extract group names from tuples
+    except Exception as e:
+        print(f"{Colors.RED}Error listing consumer groups: {e}{Colors.END}")
+        return []
+
+def get_lag(group_name, bootstrap_servers):
+    try:
+        admin_client = KafkaAdminClient(
+            bootstrap_servers=bootstrap_servers,
+            client_id="kafka_util"
+        )
+
+        # Get committed offsets
+        group_offsets = admin_client.list_consumer_group_offsets(group_name)
+        if not group_offsets:
+            print(f"Consumer group '{group_name}' has no offsets (maybe inactive)")
+            return None
+
+        consumer = KafkaConsumer(
+            bootstrap_servers=bootstrap_servers,
+            enable_auto_commit=False
+        )
+
+        # Get latest (log-end) offsets
+        end_offsets = consumer.end_offsets(list(group_offsets.keys()))
+
+        total_lag = 0
+        for tp, meta in group_offsets.items():
+            committed = meta.offset if meta and meta.offset != -1 else 0
+            latest = end_offsets.get(tp, 0)
+            lag = max(0, latest - committed)
+            total_lag += lag
+
+        consumer.close()
+        admin_client.close()
+        return total_lag
+
+    except Exception as e:
+        print(f"Error calculating lag for group '{group_name}': {e}")
+        return None
 
 def cli_interface():
     parser = argparse.ArgumentParser(description="Kafka regex message search")
-    parser.add_argument("--topic", required=True, help="Kafka topic name")
-    parser.add_argument("--pattern", required=True, help="Regex pattern to search")
+    parser.add_argument("--topic", help="Kafka topic name")
+    parser.add_argument("--pattern", help="Regex pattern to search")
     parser.add_argument("--count", type=int, help="Number of matches to return")
     parser.add_argument("--latest", action="store_true", help="Return only latest match")
     parser.add_argument("--scan_limit", type=int, default=100, help="Messages to scan per partition")
@@ -266,30 +318,47 @@ def cli_interface():
     parser.add_argument("--end_offset", type=int, help="End offset for search")
     parser.add_argument("--start_date", help="Start date YYYY-MM-DD")
     parser.add_argument("--end_date", help="End date YYYY-MM-DD")
-    parser.add_argument("--action", choices=["list_topics"], help="Perform a special action")
     parser.add_argument("--bootstrap", help="Bootstrap servers", default=BOOTSTRAP_SERVERS)
+    parser.add_argument("--action", choices=["list_topics", "list_groups", "get_lag"], help="Perform a special action")
+    parser.add_argument("--group", help="Consumer group name for get_lag action")
 
     args = parser.parse_args()
-    
+
     # ------------------- Handle actions -------------------
     if args.action == "list_topics":
-        from kafka import KafkaConsumer
-        try:
-            consumer = KafkaConsumer(bootstrap_servers=args.bootstrap, consumer_timeout_ms=2000)
-            topics = list(consumer.topics())
-            consumer.close()
+        topics = list_topics(args.bootstrap)
+        if topics:
             print(f"{Colors.CYAN}Kafka Topics:{Colors.END}")
             for t in topics:
                 print(f"  - {t}")
-            return 0
-        except Exception as e:
-            print(f"{Colors.RED}Error fetching topics: {str(e)}{Colors.END}")
-            return 1
+        return 0
 
-    # ------------------- Parse dates -------------------
+    elif args.action == "list_groups":
+        groups = list_groups(args.bootstrap)
+        if groups:
+            print(f"{Colors.CYAN}Consumer Groups:{Colors.END}")
+            for g in groups:
+                print(f"  - {g}")
+        return 0
+
+    elif args.action == "get_lag":
+        if not args.group:
+            print(f"{Colors.RED}Error: --group is required for get_lag{Colors.END}")
+            return 1
+        lag = get_lag(args.group, args.bootstrap)
+        if lag is not None:
+            print(f"{Colors.CYAN}Total Lag: {lag}{Colors.END}")
+        return 0
+
+    # ------------------- Message search -------------------
+    if not args.topic or not args.pattern:
+        print(f"{Colors.RED}Error: --topic and --pattern are required for message search{Colors.END}")
+        return 1
+
+    # Parse dates
     start_date = datetime.datetime.strptime(args.start_date, "%Y-%m-%d") if args.start_date else None
     end_date = datetime.datetime.strptime(args.end_date, "%Y-%m-%d") if args.end_date else None
-    
+
     # Parse partitions
     target_partitions = parse_multiple_partitions(args.partition)
 
@@ -297,6 +366,7 @@ def cli_interface():
         messages, pattern = search_messages(
             args.topic,
             args.pattern,
+            bootstrap_servers=args.bootstrap,  # FIXED: Pass bootstrap_servers parameter
             count=args.count,
             latest=args.latest,
             scan_limit=args.scan_limit,
@@ -317,11 +387,11 @@ def cli_interface():
                 print_message(message_data, pattern, i)
         else:
             print(f"{Colors.YELLOW}No messages found matching pattern '{args.pattern}'{Colors.END}")
-            
+
     except Exception as e:
         print(f"{Colors.RED}Error: {str(e)}{Colors.END}")
         return 1
-    
+
     return 0
 
 
