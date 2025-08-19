@@ -8,9 +8,14 @@ from kafka import KafkaConsumer, TopicPartition
 from kafka.admin import KafkaAdminClient
 import subprocess
 import requests
+from dotenv import load_dotenv
 
-BOOTSTRAP_SERVERS = os.getenv('BOOTSTRAP_SERVERS', 'broker:29092')
-OUTPUT_DIR = os.getenv('OUTPUT_DIR', './output')
+load_dotenv()  # loads .env into environment
+
+BOOTSTRAP_SERVERS = os.getenv('BOOTSTRAP_SERVERS', 'localhost:9092')
+UPLOAD_USER = os.getenv('UPLOAD_USER')
+UPLOAD_PWD = os.getenv('UPLOAD_PWD')
+
 
 class Colors:
     RED = '\033[91m'
@@ -199,7 +204,7 @@ def dump_messages_to_file(messages, filename):
 
     # Remote URL and auth
     remote_url = f"https://packages.cyware.com/repository/cyware/naman/{filename}"
-    auth = ("ctix", "fj3HuaWq3y")  # user:password
+    auth = (UPLOAD_USER,UPLOAD_PWD)  # user:password
 
     # Upload content
     response = requests.put(remote_url, data=content.encode("utf-8"), auth=auth)
