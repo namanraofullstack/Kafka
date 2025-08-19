@@ -231,6 +231,25 @@ def print_message(message_data, pattern, index):
     else:
         print(msg)
     print(f"{Colors.CYAN}{'─'*50}{Colors.END}\n")
+
+# -------------------- Fixed function name to match import --------------------
+def list_topics(bootstrap_servers=BOOTSTRAP_SERVERS):
+    """
+    Return a list of Kafka topics using KafkaConsumer API
+    """
+    try:
+        consumer = KafkaConsumer(
+            bootstrap_servers=bootstrap_servers,
+            enable_auto_commit=False,
+            consumer_timeout_ms=2000
+        )
+        topics = list(consumer.topics())
+        consumer.close()
+        return topics
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching topics: {e}{Colors.END}")
+        return []
+
     
 
 def cli_interface():
@@ -247,10 +266,27 @@ def cli_interface():
     parser.add_argument("--end_offset", type=int, help="End offset for search")
     parser.add_argument("--start_date", help="Start date YYYY-MM-DD")
     parser.add_argument("--end_date", help="End date YYYY-MM-DD")
+    parser.add_argument("--action", choices=["list_topics"], help="Perform a special action")
+    parser.add_argument("--bootstrap", help="Bootstrap servers", default=BOOTSTRAP_SERVERS)
 
     args = parser.parse_args()
     
-    # Parse dates
+    # ------------------- Handle actions -------------------
+    if args.action == "list_topics":
+        from kafka import KafkaConsumer
+        try:
+            consumer = KafkaConsumer(bootstrap_servers=args.bootstrap, consumer_timeout_ms=2000)
+            topics = list(consumer.topics())
+            consumer.close()
+            print(f"{Colors.CYAN}Kafka Topics:{Colors.END}")
+            for t in topics:
+                print(f"  - {t}")
+            return 0
+        except Exception as e:
+            print(f"{Colors.RED}Error fetching topics: {str(e)}{Colors.END}")
+            return 1
+
+    # ------------------- Parse dates -------------------
     start_date = datetime.datetime.strptime(args.start_date, "%Y-%m-%d") if args.start_date else None
     end_date = datetime.datetime.strptime(args.end_date, "%Y-%m-%d") if args.end_date else None
     
