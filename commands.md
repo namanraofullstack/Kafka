@@ -18,3 +18,9 @@ python manage.py kafkasearch --list_topics
 
 # pull for docker tool in ec2
 docker pull packages.cyware.com/ctix/naman/kafka-search-tool:latest
+
+# docker built 
+docker build -t packages.cyware.com/ctix/naman/kafka-search-tool:latest .
+
+# docker push
+docker push packages.cyware.com/ctix/naman/kafka-search-tool:latest  
